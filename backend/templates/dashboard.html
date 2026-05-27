@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dashboard</title>
+  <style>
+    :root {
+      --bg: #f7f9fc;
+      --card: #ffffff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --ok: #15803d;
+      --warn: #b45309;
+      --bad: #b91c1c;
+      --accent: #0f766e;
+      --border: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      color: var(--text);
+      background: linear-gradient(180deg, #edf6f9 0%, var(--bg) 45%);
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 40px; }
+    .top {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+      margin-bottom: 16px;
+    }
+    h1 { margin: 0; font-size: 28px; }
+    .meta { color: var(--muted); font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+    }
+    .title { font-size: 13px; color: var(--muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .row { display: flex; justify-content: space-between; margin: 6px 0; gap: 8px; }
+    .label { color: var(--muted); }
+    .value { font-weight: 600; text-align: right; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .bad { color: var(--bad); }
+    .section-title { margin: 0 0 10px; font-size: 18px; }
+    .toggle-wrap { margin-bottom: 8px; }
+    .toggle {
+      display: block; width: 100%; padding: 8px; border: none; border-radius: 8px;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: .15s;
+    }
+    .toggle-on { background: var(--ok); color: #fff; }
+    .toggle-off { background: var(--bad); color: #fff; }
+    .toggle-idle { background: var(--border); color: var(--muted); cursor: default; }
+    .toggle:hover { filter: brightness(1.08); }
+    .toggle:disabled { opacity: .5; cursor: wait; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <h1>Dashboard</h1>
+      <div class="meta" id="last-refresh">refreshing...</div>
+    </div>
+
+    <h2 class="section-title">MQTT Clients</h2>
+    <div class="grid" id="mqtt-grid"></div>
+
+    <h2 class="section-title">Modbus Clients</h2>
+    <div class="grid" id="modbus-grid"></div>
+  </div>
+
+  <script>
+    const cardRefs = new Map();
+
+    function fmtPrice(v) {
+      if (typeof v !== "number" || Number.isNaN(v)) return "-";
+      return `$${v.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
+    }
+
+    async function fetchJson(url, opts) {
+      const res = await fetch(url, opts);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }
+
+    function setValue(el, text, cls) {
+      if (el.textContent !== text) el.textContent = text;
+      if (cls !== undefined && el.className !== cls) el.className = cls;
+    }
+
+    function serviceState(service) {
+      const status = String(service?.status || "").toLowerCase();
+      if (status === "live") return { label: "Live", cls: "ok" };
+      if (status === "stopped") return { label: "Stopped", cls: "bad" };
+      if (status === "stale") return { label: "Stale", cls: "warn" };
+      if (service?.running === true) return { label: "Running", cls: "ok" };
+      if (service?.running === false) return { label: "Stopped", cls: "bad" };
+      return { label: "Unknown", cls: "warn" };
+    }
+
+    async function sendCommand(name, command) {
+      return await fetchJson(`/api/service/${name}/command/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      });
+    }
+
+    function updateToggle(name) {
+      const refs = cardRefs.get(name);
+      if (!refs || !refs.toggle) return;
+      const st = refs.service || { running: false };
+      refs.toggle.textContent = st.running ? "Stop" : "Start";
+      refs.toggle.className = `toggle ${st.running ? "toggle-off" : "toggle-on"}`;
+      refs.toggle.disabled = false;
+    }
+
+    function makeToggle(container, name) {
+      const wrap = document.createElement("div");
+      wrap.className = "toggle-wrap";
+      const btn = document.createElement("button");
+      btn.className = "toggle";
+      btn.disabled = true;
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        const current = cardRefs.get(name)?.service || {};
+        const cmd = current.running ? "stop" : "start";
+        try {
+          const result = await sendCommand(name, cmd);
+          const refs = cardRefs.get(name);
+          if (refs) {
+            refs.service = {
+              running: Boolean(result.running),
+              status: String(result.runtime_status || ""),
+            };
+            updateToggle(name);
+            await refresh();
+          }
+        } catch (_) {
+          updateToggle(name);
+        }
+      });
+      wrap.appendChild(btn);
+      container.appendChild(wrap);
+      return btn;
+    }
+
+    function makeCard(container, id, labels, withToggle = false) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.dataset.cardId = id;
+      const h = document.createElement("div");
+      h.className = "title";
+      h.textContent = id;
+      card.appendChild(h);
+      const rowEls = [];
+      labels.forEach((l) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        row.innerHTML = `<span class="label">${l.label}</span><span class="value">-</span>`;
+        row.dataset.label = l.label;
+        card.appendChild(row);
+        rowEls.push({ row, value: row.querySelector(".value") });
+      });
+      const toggleWrap = document.createElement("div");
+      toggleWrap.className = "toggle-wrap";
+      const toggle = withToggle ? makeToggle(toggleWrap, id) : null;
+      if (toggle) card.appendChild(toggleWrap);
+      container.appendChild(card);
+      cardRefs.set(id, {
+        rows: rowEls,
+        toggle,
+        service: { running: false, status: "unknown" },
+      });
+    }
+
+    function ensureCard(section, id) {
+      if (cardRefs.has(id)) return;
+      const mqttGrid = document.getElementById("mqtt-grid");
+      const modbusGrid = document.getElementById("modbus-grid");
+      if (section === "mqtt") {
+        makeCard(
+          mqttGrid,
+          id,
+          [
+            { label: "Asset" },
+            { label: "Price" },
+            { label: "Status" },
+            { label: "Fetched" },
+            { label: "Service" },
+          ],
+          true
+        );
+        return;
+      }
+      if (section === "modbus") {
+        makeCard(modbusGrid, id, [
+          { label: "Symbol" },
+          { label: "Price" },
+          { label: "Status" },
+          { label: "Fetched" },
+          { label: "Service" },
+        ]);
+      }
+    }
+
+    function renderMqttCard(item) {
+      const refs = cardRefs.get(item.client_id);
+      if (!refs) return;
+      const service = item.service || {};
+      const status = serviceState(service);
+      setValue(
+        refs.rows[0].value,
+        item.asset_id ? `${item.asset_id} (${item.symbol || "-"})` : "-",
+        "value"
+      );
+      setValue(refs.rows[1].value, fmtPrice(item.price_usd), "value");
+      setValue(refs.rows[2].value, status.label, `value ${status.cls}`);
+      setValue(refs.rows[3].value, item.fetched_at || "-", "value");
+      setValue(
+        refs.rows[4].value,
+        service.running ? "Running" : "Stopped",
+        `value ${service.running ? "ok" : "bad"}`
+      );
+      updateToggle(item.client_id);
+    }
+
+    function renderModbusCard(item) {
+      const refs = cardRefs.get(item.asset_id);
+      if (!refs) return;
+      const service = item.service || {};
+      const status = serviceState(service);
+      setValue(refs.rows[0].value, item.symbol || "-", "value");
+      setValue(refs.rows[1].value, fmtPrice(item.price_usd), "value");
+      setValue(refs.rows[2].value, status.label, `value ${status.cls}`);
+      setValue(refs.rows[3].value, item.fetched_at || "-", "value");
+      setValue(
+        refs.rows[4].value,
+        service.running ? "Running" : "Stopped",
+        `value ${service.running ? "ok" : "bad"}`
+      );
+    }
+
+    async function refresh() {
+      try {
+        const summary = await fetchJson("/api/dashboard/summary/");
+        const mqttClients = summary.mqtt_clients || [];
+        const modbusQuotes = summary.modbus_quotes || [];
+
+        mqttClients.forEach((item) => {
+          ensureCard("mqtt", item.client_id);
+          cardRefs.get(item.client_id).service = item.service || { running: false, status: "unknown" };
+          renderMqttCard(item);
+        });
+
+        modbusQuotes.forEach((item) => {
+          ensureCard("modbus", item.asset_id);
+          cardRefs.get(item.asset_id).service = item.service || { running: false, status: "unknown" };
+          renderModbusCard(item);
+        });
+
+        document.getElementById("last-refresh").textContent = `Last refresh: ${new Date(
+          summary.updated_at || Date.now()
+        ).toLocaleTimeString()}`;
+      } catch (_) {
+        document.getElementById("last-refresh").textContent = "Refresh failed";
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

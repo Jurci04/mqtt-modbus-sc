@@ -1,0 +1,13 @@
+sequenceDiagram
+    participant User
+    participant Django
+    participant Broker as Mosquitto
+    participant Client as MQTT Client
+    participant Postgres
+
+    User->>Django: POST /api/service/{service_name}/command/
+    Django->>Broker: Publish command (QoS 1, retain=false)
+    Django->>Postgres: Store command log
+    Broker->>Client: Deliver command
+    Client->>Client: stop = pause polling/publishing only
+    Client->>Client: stay connected and subscribed

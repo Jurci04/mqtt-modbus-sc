@@ -1,0 +1,39 @@
+flowchart LR
+    CoinCap[CoinCap API]
+
+    subgraph MQTT["MQTT"]
+        MQTT1[mqtt-client-1\nBTC]
+        MQTT2[mqtt-client-2\nETH]
+        MQTT3[mqtt-client-3\nLTC]
+        Broker[Mosquitto Broker]
+        Ingestor[MQTT Ingestor]
+    end
+
+    subgraph Modbus["Modbus TLS"]
+        ModbusServer[Modbus TLS Server\nport 10802\nRegisters: BTC ETH LTC]
+        ModbusClient[Modbus TLS Client]
+    end
+
+    subgraph Backend["Django Backend"]
+        Django[Django API\nMQTT command publisher]
+        Postgres[(PostgreSQL)]
+        Mongo[(MongoDB)]
+    end
+
+    CoinCap --> MQTT1
+    CoinCap --> MQTT2
+    CoinCap --> MQTT3
+    CoinCap --> ModbusServer
+
+    MQTT1 -->|telemetry publish| Broker
+    MQTT2 -->|telemetry publish| Broker
+    MQTT3 -->|telemetry publish| Broker
+    Broker -->|telemetry subscription| Ingestor
+    Ingestor --> Mongo
+
+    ModbusServer -->|TLS register reads| ModbusClient
+    ModbusClient --> Mongo
+
+    Django --> Postgres
+    Django --> Mongo
+    Django -->|publish client commands| Broker

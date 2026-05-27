@@ -1,0 +1,18 @@
+user mqtt-client-1
+topic write easycon/clients/mqtt-client-1/telemetry/crypto
+topic read easycon/clients/mqtt-client-1/command
+
+user mqtt-client-2
+topic write easycon/clients/mqtt-client-2/telemetry/crypto
+topic read easycon/clients/mqtt-client-2/command
+
+user mqtt-client-3
+topic write easycon/clients/mqtt-client-3/telemetry/crypto
+topic read easycon/clients/mqtt-client-3/command
+
+user mqtt-ingestor
+topic read easycon/clients/+/telemetry/crypto
+
+user django-api
+topic write easycon/clients/+/command
+topic read easycon/clients/+/command

@@ -1,0 +1,239 @@
+services:
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  mongo:
+    image: mongo:latest
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    ports:
+      - "${MONGO_PORT}:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --host 127.0.0.1 --port 27017 -u ${MONGO_USER} -p ${MONGO_PASSWORD} --authenticationDatabase admin --eval 'db.runCommand({ ping: 1 })' | grep -q 'ok'",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  adminer:
+    image: adminer:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  mongo-express:
+    image: mongo-express:latest
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: ${MONGO_PORT}
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD}
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD}
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    ports:
+      - "${MQTT_PORT}:8888"
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./infra/mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./infra/mosquitto/aclfile:/mosquitto/config/aclfile:ro
+      - ./infra/certs:/mosquitto/certs:ro
+      - mosquitto_data:/mosquitto/data
+
+  django:
+    build: .
+    working_dir: /app
+    command: sh -c "python backend/manage.py migrate && python backend/manage.py seed_assignment_data && python backend/manage.py runserver 0.0.0.0:8000"
+    env_file:
+      - .env
+    environment:
+      DJANGO_DB_HOST: postgres
+      POSTGRES_HOST: postgres
+      MONGO_HOST: mongo
+      MQTT_HOST: mosquitto
+      MQTT_TLS_CA_CERT: /certs/ca/ca.crt
+      MQTT_TLS_CLIENT_CERT: /certs/mqtt/django.crt
+      MQTT_TLS_CLIENT_KEY: /certs/mqtt/django.key
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    volumes:
+      - ./infra/certs:/certs:ro
+
+  mqtt-client-1:
+    build: .
+    working_dir: /app
+    command: python -c "from services.mqtt.client.core import run; run()"
+    env_file:
+      - .env
+    environment:
+      CLIENT_ID: mqtt-client-1
+      ASSET_ID: bitcoin
+      SYMBOL: BTC
+      MONGO_HOST: mongo
+      MQTT_HOST: mosquitto
+      MQTT_USERNAME: ${MQTT_CLIENT_1_USERNAME}
+      MQTT_PASSWORD: ${MQTT_CLIENT_1_PASSWORD}
+      MQTT_TLS_CA_CERT: /certs/ca/ca.crt
+      MQTT_TLS_CLIENT_CERT: /certs/mqtt/client1.crt
+      MQTT_TLS_CLIENT_KEY: /certs/mqtt/client1.key
+    depends_on:
+      mosquitto:
+        condition: service_started
+    volumes:
+      - ./infra/certs:/certs:ro
+
+  mqtt-client-2:
+    build: .
+    working_dir: /app
+    command: python -c "from services.mqtt.client.core import run; run()"
+    env_file:
+      - .env
+    environment:
+      CLIENT_ID: mqtt-client-2
+      ASSET_ID: ethereum
+      SYMBOL: ETH
+      MONGO_HOST: mongo
+      MQTT_HOST: mosquitto
+      MQTT_USERNAME: ${MQTT_CLIENT_2_USERNAME}
+      MQTT_PASSWORD: ${MQTT_CLIENT_2_PASSWORD}
+      MQTT_TLS_CA_CERT: /certs/ca/ca.crt
+      MQTT_TLS_CLIENT_CERT: /certs/mqtt/client2.crt
+      MQTT_TLS_CLIENT_KEY: /certs/mqtt/client2.key
+    depends_on:
+      mosquitto:
+        condition: service_started
+    volumes:
+      - ./infra/certs:/certs:ro
+
+  mqtt-client-3:
+    build: .
+    working_dir: /app
+    command: python -c "from services.mqtt.client.core import run; run()"
+    env_file:
+      - .env
+    environment:
+      CLIENT_ID: mqtt-client-3
+      ASSET_ID: litecoin
+      SYMBOL: LTC
+      MONGO_HOST: mongo
+      MQTT_HOST: mosquitto
+      MQTT_USERNAME: ${MQTT_CLIENT_3_USERNAME}
+      MQTT_PASSWORD: ${MQTT_CLIENT_3_PASSWORD}
+      MQTT_TLS_CA_CERT: /certs/ca/ca.crt
+      MQTT_TLS_CLIENT_CERT: /certs/mqtt/client3.crt
+      MQTT_TLS_CLIENT_KEY: /certs/mqtt/client3.key
+    depends_on:
+      mosquitto:
+        condition: service_started
+    volumes:
+      - ./infra/certs:/certs:ro
+
+  mqtt-ingestor:
+    build: .
+    working_dir: /app
+    command: python -c "from services.mqtt.ingestor.core import run; run()"
+    env_file:
+      - .env
+    environment:
+      MONGO_HOST: mongo
+      MQTT_HOST: mosquitto
+      MQTT_USERNAME: ${MQTT_INGESTOR_USERNAME}
+      MQTT_PASSWORD: ${MQTT_INGESTOR_PASSWORD}
+      MQTT_TLS_CA_CERT: /certs/ca/ca.crt
+      MQTT_TLS_CLIENT_CERT: /certs/mqtt/ingestor.crt
+      MQTT_TLS_CLIENT_KEY: /certs/mqtt/ingestor.key
+    depends_on:
+      mongo:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    volumes:
+      - ./infra/certs:/certs:ro
+
+  modbus-server:
+    build: .
+    working_dir: /app
+    command: python -c "from services.modbus.server.core import run; run()"
+    env_file:
+      - .env
+    environment:
+      MODBUS_HOST: 0.0.0.0
+      MODBUS_TLS_CA_CERT: /certs/ca/ca.crt
+      MODBUS_TLS_CLIENT_CERT: /certs/modbus/modbus-server.crt
+      MODBUS_TLS_CLIENT_KEY: /certs/modbus/modbus-server.key
+    ports:
+      - "${MODBUS_PORT}:10802"
+    volumes:
+      - ./infra/certs:/certs:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import socket; s = socket.create_connection(('127.0.0.1', 10802), 1); s.close()\"",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  modbus-client:
+    build: .
+    working_dir: /app
+    command: python -c "from services.modbus.client.core import run; run()"
+    env_file:
+      - .env
+    environment:
+      MONGO_HOST: mongo
+      MODBUS_HOST: modbus-server
+      MODBUS_TLS_CA_CERT: /certs/ca/ca.crt
+      MODBUS_TLS_CLIENT_CERT: /certs/modbus/modbus-client.crt
+      MODBUS_TLS_CLIENT_KEY: /certs/modbus/modbus-client.key
+    depends_on:
+      mongo:
+        condition: service_healthy
+      modbus-server:
+        condition: service_healthy
+    volumes:
+      - ./infra/certs:/certs:ro
+
+volumes:
+  postgres_data:
+  mongo_data:
+  mosquitto_data:

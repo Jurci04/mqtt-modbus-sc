@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Django
+*.sqlite3
+staticfiles/
+media/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+
+# Runtime logs
+*.log
+
+# Certs/secrets
+*.pem
+*.key
+*.crt
+*.csr
+*.srl
+infra/mosquitto/passwd
+
+# Plots
+plots/
