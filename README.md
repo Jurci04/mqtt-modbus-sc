@@ -1,8 +1,8 @@
-# EASYCON Backend Assignment
+# Showcase MQTT/ModBus Client-Server
 
 Author: Juraj Štibrány 
 
-Welcome to the assignment solution for a Python Backend developer at Easycon. I hope you will find the solution clear, understandable, but most importantly that it will provide a sufficient showcase of my skills. The project shows one end-to-end flow built around two protocols, which fetch the prices of cryptocurrencies (BTC, ETH and LTC):
+Welcome. I hope you will find the solution clear, understandable, but most importantly that it will provide a sufficient showcase of my skills. The project shows one end-to-end flow built around two protocols, which fetch the prices of cryptocurrencies (BTC, ETH and LTC):
 
 - Async MQTT is pushed from clients into the broker and then stored by the ingestor.
 - Sync Modbus is fetched by the client from the server and then stored as readings.
